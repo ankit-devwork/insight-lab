@@ -56,29 +56,36 @@ docker compose up -d
 
 Starts local **Redis** and **Neo4j**. Use a hosted [Supabase](https://supabase.com) project for auth and Postgres.
 
-### 3. Backend
+### 3. Backend (Conda)
 
-```bash
+```powershell
 cd backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate insightlab
+copy .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
+
+See [backend/README.md](backend/README.md) for Conda updates and troubleshooting.
 
 - API: http://localhost:8000
 - Docs: http://localhost:8000/docs
 
-### 4. Frontend
+### 4. Frontend (Next.js + Supabase Auth)
 
-```bash
+```powershell
 cd frontend
+copy .env.local.example .env.local
+# Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 npm install
 npm run dev
 ```
 
 - App: http://localhost:3000
+- Login: http://localhost:3000/login
 
-> Frontend scaffolding is in place; full UI implementation is tracked in project milestones.
+See [frontend/README.md](frontend/README.md) for Google OAuth setup in Supabase.
 
 ## Environment variables
 
@@ -98,19 +105,21 @@ See `.env.example` and `backend/.env.example` for the full list.
 
 ## Development status
 
-This repository is in **initial scaffolding** phase:
+See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for the full checklist.
 
 - [x] Architecture documented
 - [x] Repo structure and MIT license
-- [x] Backend health-check skeleton
-- [ ] Supabase schema + RLS
-- [ ] Next.js auth and dashboard
+- [x] Backend health + `/ready` checks
+- [x] Supabase schema + Storage
+- [x] Next.js auth (email + Google) + dashboard
+- [x] **pycorekit + JWT auth + `GET /me`**
+- [ ] File upload API
 - [ ] Excel, document, and quiz pipelines
 
 ## Related projects
 
 - [genai-doc-assistant-capstone](https://github.com/ankit-devwork/the-learning-curve-labs/tree/main/genai-doc-assistant-capstone) — multi-agent RAG reference
-- [pycorekit](https://github.com/ankit-devwork/the-learning-curve-labs/tree/main/pycorekit) — shared logging, cache, tracing
+- [pycorekit](https://github.com/ankit-devwork/the-learning-curve-labs/tree/main/pycorekit) — shared logging, cache, tracing (**required by backend**)
 
 ## License
 
