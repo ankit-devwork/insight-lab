@@ -99,6 +99,27 @@ Documents uploaded **before** migration 003 must be **re-processed** to populate
 
 Ask responses include `retrieval_method` (`vector` or `keyword`) — vector search is tried first; keyword matching is the fallback.
 
+### Troubleshooting null embeddings
+
+If `document_chunks.embedding` is `NULL` for all rows:
+
+| Cause | Fix |
+|-------|-----|
+| **Old Step 1.7 backend (main without PR #19)** | Sync the pgvector embeddings code — main only inserts `content`, not `embedding` |
+| **Migration 003 not run** | Run `003_pgvector_embeddings.sql` in Supabase SQL Editor |
+| **`fastembed` not installed** | `pip install fastembed` then restart uvicorn |
+| **Processed before embeddings landed** | Re-process each document (`POST /documents/{id}/process` or open detail page) |
+
+Verify after re-process:
+
+```sql
+select document_id, count(*) as chunks, count(embedding) as with_embeddings
+from document_chunks
+group by document_id;
+```
+
+Process API response should include `"embedded_count": N` matching `chunk_count`.
+
 ---
 
 Supabase may sign access tokens with **ES256** (new signing keys) or **HS256** (legacy JWT secret). The backend picks the method from the token header `alg`:
@@ -114,10 +135,13 @@ Check your token at [jwt.io](https://jwt.io) — paste the `access_token` from t
 
 **Frontend sign-in works but API returns 401 with "SUPABASE_URL is not configured"?**
 
-1. Add `SUPABASE_URL` to **`backend/.env`** — the frontend `NEXT_PUBLIC_SUPABASE_URL` is separate and does not apply to FastAPI.
-2. Use the exact same project URL in both files.
-3. Restart uvicorn after editing `.env`.
-4. Confirm the file path: `backend/.env` (not repo root `.env` only).
+1. Add `SUPABASE_URL` to **`backend/.env`** — the frontend `NEXT_PUBLIC_SUPABASE_URL` is separate.
+2. Restart uvicorn after editing `.env`.
+3. Run `curl http://localhost:8000/ready` and check `checks.config`:
+   - `env_file_exists` should be `true`
+   - `supabase_url_configured` should be `true`
+4. **Blank Conda/shell override:** if `echo $env:SUPABASE_URL` (PowerShell) prints nothing but auth still fails, an empty variable in your Conda env can block `.env`. Run `conda env config vars unset SUPABASE_URL` or remove it from the env, then restart the terminal.
+5. **UTF-16 `.env` on Windows:** save `backend/.env` as **UTF-8** in VS Code (bottom-right encoding picker), not Notepad UTF-16.
 
 ---
 
@@ -135,6 +159,8 @@ Check your token at [jwt.io](https://jwt.io) — paste the `access_token` from t
 | POST | `/documents/{id}/process` | **Bearer JWT** | Parse, chunk, summarize (Step 1.7) |
 | GET | `/documents/{id}/summary` | **Bearer JWT** | Cached summary from Redis/Postgres |
 | POST | `/documents/{id}/ask` | **Bearer JWT** | RAG chat over document chunks |
+| POST | `/documents/{id}/analyze` | **Bearer JWT** | Excel profile + charts + insights (Step 1.8) |
+| GET | `/documents/{id}/charts` | **Bearer JWT** | Cached Excel analysis |
 | GET | `/docs` | No | OpenAPI UI |
 
 ### Calling `/me` from curl

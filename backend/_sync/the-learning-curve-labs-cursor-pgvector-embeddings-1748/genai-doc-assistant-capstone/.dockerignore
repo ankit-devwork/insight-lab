@@ -1,5 +1,0 @@
-pycorekit/build/
-pycorekit/dist/
-pycorekit/*.egg-info
-__pycache__/
-*.pyc

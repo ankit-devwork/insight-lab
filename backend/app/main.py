@@ -9,11 +9,12 @@ from pycorekit.exceptions.handlers import app_exception_handler, generic_excepti
 from pycorekit.tracing.middleware import RequestTracingMiddleware
 
 from app.api.routes.documents import router as documents_router
+from app.api.routes.excel import router as excel_router
 from app.api.routes.health import router as health_router
 from app.api.routes.me import router as me_router
 from app.api.routes.upload import router as upload_router
 from app.core.cache import close_cache
-from app.core.config import ENV_PATH, settings
+from app.core.config import ENV_PATH, config_diagnostics, settings
 from app.core.yaml_config import get_yaml_config
 from app.core.neo4j_client import neo4j_client
 from app.core.redis_client import redis_client
@@ -28,9 +29,13 @@ init_logger(
 )
 
 if not settings.supabase_url.strip():
+    diag = config_diagnostics()
     get_logger("startup").warning(
-        "SUPABASE_URL is not set — authenticated routes will return 401 for ES256 tokens. "
-        f"Add it to {ENV_PATH}",
+        "SUPABASE_URL is not loaded — authenticated routes will return 401 for ES256 tokens. "
+        f"env_file={diag['env_file']} exists={diag['env_file_exists']} "
+        f"root_env_exists={diag['root_env_file_exists']}. "
+        "If backend/.env has the value, check for an empty SUPABASE_URL in Conda/shell env "
+        "or save .env as UTF-8 (not UTF-16).",
     )
 
 
@@ -69,6 +74,7 @@ app.include_router(health_router, tags=["health"])
 app.include_router(me_router, tags=["auth"])
 app.include_router(upload_router, tags=["documents"])
 app.include_router(documents_router, tags=["documents"])
+app.include_router(excel_router, tags=["excel"])
 
 
 @app.get("/")
@@ -82,4 +88,6 @@ async def root():
         "upload": "/upload",
         "upload_config": "/upload/config",
         "documents": "/documents",
+        "excel_analyze": "/documents/{id}/analyze",
+        "excel_charts": "/documents/{id}/charts",
     }
