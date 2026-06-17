@@ -38,6 +38,27 @@ def test_parse_chart_plan_json():
     assert items[0]["chart_type"] == "bar"
 
 
+def test_parse_chart_plan_coerces_numeric_ids():
+    raw = """
+    {
+      "charts": [
+        {
+          "id": 1,
+          "title": "Sales by region",
+          "chart_type": "BAR",
+          "x_column": "region",
+          "y_column": "sales",
+          "aggregation": "SUM"
+        }
+      ]
+    }
+    """
+    items = parse_chart_plan(raw, max_charts=3)
+    assert items[0]["id"] == "1"
+    assert items[0]["chart_type"] == "bar"
+    assert items[0]["aggregation"] == "sum"
+
+
 def test_build_charts_from_plan():
     df = pd.read_csv(io.StringIO("region,sales\nNorth,100\nSouth,80\nEast,120\n"))
     plan = [
@@ -54,6 +75,30 @@ def test_build_charts_from_plan():
     assert len(charts) == 1
     assert charts[0]["labels"] == ["East", "North", "South"]
     assert charts[0]["values"][0] == 120.0
+
+
+def test_build_line_chart_sorts_by_date():
+    df = pd.read_csv(
+        io.StringIO(
+            "Date,Quantity\n"
+            "2025-05-11,86\n"
+            "2024-03-21,63\n"
+            "2024-11-02,75\n"
+        )
+    )
+    plan = [
+        {
+            "id": "c2",
+            "title": "Quantity by date",
+            "chart_type": "line",
+            "x_column": "Date",
+            "y_column": "Quantity",
+            "aggregation": "sum",
+        }
+    ]
+    charts = build_charts_from_plan(df, plan)
+    assert charts[0]["labels"] == ["2024-03-21", "2024-11-02", "2025-05-11"]
+    assert charts[0]["values"] == [63.0, 75.0, 86.0]
 
 
 def test_circuit_breaker_opens_after_failures():
