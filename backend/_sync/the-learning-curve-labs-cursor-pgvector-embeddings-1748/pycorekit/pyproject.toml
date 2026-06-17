@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pycorekit"
+version = "0.2.0"
+description = "Core utilities for GenAI projects"
+authors = [
+    { name = "Ankit" }
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "loguru",
+    "pyyaml",
+    "python-dotenv",
+    "pydantic>=2",
+    "fastapi",
+    "langsmith",
+    "langfuse",
+    "httpx",
+    "redis",
+]
+
+[tool.setuptools]
+package-dir = { "pycorekit" = "." }
+packages = [
+    "pycorekit",
+    "pycorekit.cache",
+    "pycorekit.correlation",
+    "pycorekit.core_logging",
+    "pycorekit.exceptions",
+    "pycorekit.observability",
+    "pycorekit.tracing",
+    "pycorekit.utils",
+]

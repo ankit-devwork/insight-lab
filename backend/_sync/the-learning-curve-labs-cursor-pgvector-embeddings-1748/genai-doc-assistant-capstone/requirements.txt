@@ -1,0 +1,25 @@
+pydantic>=2
+fastapi
+uvicorn[standard]
+chromadb
+sentence-transformers
+python-dotenv
+langgraph
+litellm
+loguru
+langfuse
+python-multipart
+boto3
+aiofiles
+pandas
+pdfminer.six
+langchain-text-splitters
+pyyaml
+scikit-learn
+openpyxl
+pytest
+pytest-asyncio
+httpx
+
+# CPU-only torch (install separately if needed):
+# pip install torch --index-url https://download.pytorch.org/whl/cpu

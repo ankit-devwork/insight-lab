@@ -1,0 +1,53 @@
+name: Capstone and pycorekit CI
+
+on:
+  push:
+    paths:
+      - "pycorekit/**"
+      - "genai-doc-assistant-capstone/**"
+      - ".github/workflows/capstone-pycorekit-ci.yml"
+  pull_request:
+    paths:
+      - "pycorekit/**"
+      - "genai-doc-assistant-capstone/**"
+      - ".github/workflows/capstone-pycorekit-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Upgrade pip and build tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install pycorekit (editable)
+        run: |
+          pip install -e "./pycorekit"
+          python -c "import pycorekit; print('pycorekit', pycorekit.__version__)"
+
+      - name: Install capstone dependencies
+        run: |
+          pip install -r genai-doc-assistant-capstone/requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -c "import pycorekit; print('pycorekit import ok after capstone deps')"
+
+      - name: Run pycorekit tests
+        run: pytest pycorekit/tests -q
+
+      - name: Run capstone tests
+        working-directory: genai-doc-assistant-capstone
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: pytest tests -q
+
+      - name: Import smoke test
+        working-directory: genai-doc-assistant-capstone
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -c "from main import app; print(app.title)"
