@@ -48,6 +48,109 @@ export type AskResponse = {
   correlation_id?: string;
 };
 
+export type QuizQuestion = {
+  id: string;
+  question_text: string;
+  options: string[];
+  sort_order: number;
+};
+
+export type QuizResponse = {
+  quiz_id: string;
+  document_id: string;
+  title: string;
+  question_type: "scq" | "mcq" | "true_false";
+  difficulty: string;
+  questions: QuizQuestion[];
+  cached?: boolean;
+  target_concepts?: ConceptMasteryItem[];
+  correlation_id?: string;
+};
+
+export type QuizResultItem = {
+  question_id: string;
+  question_text: string;
+  selected_option_index: number;
+  correct_option_index: number;
+  correct: boolean;
+  explanation?: string | null;
+};
+
+export type QuizSubmitResponse = {
+  attempt_id?: string | null;
+  quiz_id: string;
+  document_id: string;
+  score: number;
+  total: number;
+  percent: number;
+  results: QuizResultItem[];
+  correlation_id?: string;
+};
+
+export type ConceptMasteryItem = {
+  concept_id: string;
+  name: string;
+  topic?: string | null;
+  attempts: number;
+  correct: number;
+  percent?: number | null;
+  last_attempt_at?: string | null;
+};
+
+export type ConceptMasteryResponse = {
+  document_id: string;
+  concepts: ConceptMasteryItem[];
+  correlation_id?: string;
+};
+
+export type GraphNode = {
+  id: string;
+  label: string;
+  topic?: string | null;
+  chunk_indexes?: number[];
+};
+
+export type GraphEdge = {
+  source: string;
+  target: string;
+  type: string;
+};
+
+export type DocumentGraphResponse = {
+  document_id: string;
+  filename: string;
+  neo4j_synced_at?: string | null;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  correlation_id?: string;
+};
+
+export type GraphSyncResponse = {
+  document_id: string;
+  concept_count: number;
+  relationship_count: number;
+  neo4j_synced: boolean;
+  synced_at: string;
+  cached?: boolean;
+  correlation_id?: string;
+};
+
+export type MultiAskResponse = {
+  document_ids: string[];
+  question: string;
+  answer: string;
+  cited_documents?: string[];
+  retrieval_method?: "vector" | "keyword";
+  cached?: boolean;
+  correlation_id?: string;
+};
+
+export type GenerateQuizRequest = {
+  question_type?: "scq" | "mcq" | "true_false";
+  difficulty?: "easy" | "medium" | "hard";
+  num_questions?: number;
+};
+
 export type ExcelChart = {
   id: string;
   title: string;
@@ -57,6 +160,20 @@ export type ExcelChart = {
   aggregation?: string;
   labels: string[];
   values: number[];
+  custom?: boolean;
+};
+
+export type CustomChartRequest = {
+  chart_type: ExcelChart["chart_type"];
+  x_column: string;
+  y_column?: string | null;
+  aggregation?: "sum" | "mean" | "count" | "none";
+  title?: string | null;
+};
+
+export type CustomChartResponse = {
+  chart: ExcelChart;
+  correlation_id?: string;
 };
 
 export type ExcelAnalysisResponse = {
@@ -79,8 +196,16 @@ export type ExcelAnalysisResponse = {
   correlation_id?: string;
 };
 
+export type ExcelAskResponse = {
+  document_id: string;
+  question: string;
+  answer: string;
+  sources?: string[];
+  cached?: boolean;
+  correlation_id?: string;
+};
+
 export type UploadResponse = DocumentSummary & {
-  storage_path: string;
   correlation_id?: string;
 };
 

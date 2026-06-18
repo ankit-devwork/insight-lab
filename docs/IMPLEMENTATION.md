@@ -16,7 +16,7 @@ Living document updated as features land. See [ARCHITECTURE.md](ARCHITECTURE.md)
 | **1.7** | **Document summary + chat** | **Done** | `POST /process`, `GET /summary`, `POST /ask`, Redis cache |
 | **1.7b** | **pgvector embeddings (RAG)** | **Done** | fastembed + `match_document_chunks` RPC, vector retrieval |
 | **1.8** | **Excel charts pipeline** | **Done** | `POST /analyze`, `GET /charts`, retry + circuit breaker |
-| 1.9 | Quiz generator | Planned | `POST /quiz/generate` |
+| **1.9** | **Quiz generator** | **Done** | `POST /quiz/generate`, `GET /quiz`, `POST /quiz/submit` |
 
 ---
 
@@ -283,7 +283,86 @@ Run `supabase/migrations/004_excel_charts.sql` — adds `excel_profile`, `excel_
 
 ---
 
-## Next up — Step 1.9 Quiz generator
+## Step 1.9 — Quiz generator (implemented)
 
-- Generate SCQ/MCQ from ingested documents
-- Score attempts and store results
+### Backend
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Quiz parsing | `app/services/quiz_questions.py` | Validate LLM JSON quiz payload |
+| Quiz service | `app/services/quiz_service.py` | Generate, fetch, score attempts |
+| LLM | `app/services/llm_client.py` | `generate_quiz_draft`, `quiz_cache_key` |
+| Routes | `app/api/routes/quiz.py` | Generate, get, submit endpoints |
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/documents/{id}/quiz/generate` | LLM quiz from document chunks |
+| GET | `/documents/{id}/quiz` | Latest quiz for document (no answers) |
+| POST | `/quizzes/{id}/submit` | Score answers, store attempt |
+
+### Frontend
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Quiz panel | `components/documents/document-quiz-panel.tsx` | Generate, take quiz, show score |
+| Document detail | `components/documents/document-detail-client.tsx` | Quiz section on document page |
+
+### Database
+
+Uses existing tables from `001_initial.sql`: `quizzes`, `quiz_questions`, `quiz_attempts`.
+
+### Verify
+
+1. Upload and process a PDF document
+2. Open document detail → **Generate quiz**
+3. Answer questions → **Submit answers** → see score and explanations
+
+---
+
+## Phase 2 — Excel data chat (implemented)
+
+### Backend
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| LLM | `app/services/llm_client.py` | `answer_excel_question()`, user-scoped `excel_question_cache_key()` |
+| Service | `app/services/excel_service.py` | `ask_excel()` with ownership, rate limit, cache |
+| Routes | `app/api/routes/excel.py` | `POST /documents/{id}/excel/ask` |
+
+### Security
+
+- Ownership via `_get_owned_document()` (`owner_id = user.id`)
+- Separate rate limit key `excel_chat:{user_id}` (config: `excel.chat_rate_limit_per_min`)
+- Cache key includes `user_id`, `document_id`, `file_hash`, and question digest
+- LLM context uses `grounded_system_prompt()` + `tag_block()`; chart series truncated via `chart_context_points`
+- No raw file re-download on ask — uses stored profile, summary, and charts only
+- Generic error on LLM failures (`GENERIC_EXCEL_ERROR`)
+
+### Frontend
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| Chat UI | `components/excel/excel-detail-client.tsx` | Ask form + message history on Excel detail page |
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/documents/{id}/excel/ask` | Grounded Q&A over analyzed spreadsheet |
+
+### Verify
+
+1. Upload and analyze an Excel or CSV file
+2. Open Excel detail → **Ask this spreadsheet**
+3. Ask e.g. "Which region has the highest sales?" — answer references profile/charts
+
+---
+
+## Next up — Phase 2 (remaining)
+
+- [x] Excel data chat (`POST /documents/{id}/excel/ask`)
+- Neo4j concept graph sync
+- Adaptive quizzes from weak concepts
+- Multi-doc chat

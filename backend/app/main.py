@@ -8,11 +8,13 @@ from pycorekit.exceptions.base import AppException
 from pycorekit.exceptions.handlers import app_exception_handler, generic_exception_handler
 from pycorekit.tracing.middleware import RequestTracingMiddleware
 
+from app.api.routes.graph import router as graph_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.excel import router as excel_router
 from app.api.routes.health import router as health_router
 from app.api.routes.me import router as me_router
 from app.api.routes.upload import router as upload_router
+from app.api.routes.quiz import router as quiz_router
 from app.core.cache import close_cache
 from app.core.config import ENV_PATH, config_diagnostics, settings
 from app.core.yaml_config import get_yaml_config
@@ -52,6 +54,9 @@ app = FastAPI(
     description="InsightLab — Excel insights, document chat, and AI quizzes",
     version="0.2.0",
     lifespan=lifespan,
+    docs_url="/docs" if get_yaml_config().app.env.lower() in {"development", "dev", "local"} else None,
+    redoc_url="/redoc" if get_yaml_config().app.env.lower() in {"development", "dev", "local"} else None,
+    openapi_url="/openapi.json" if get_yaml_config().app.env.lower() in {"development", "dev", "local"} else None,
 )
 
 _cors_origins = os.getenv(
@@ -62,8 +67,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[origin.strip() for origin in _cors_origins.split(",") if origin.strip()],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 app.add_middleware(RequestTracingMiddleware)
 
@@ -74,7 +79,9 @@ app.include_router(health_router, tags=["health"])
 app.include_router(me_router, tags=["auth"])
 app.include_router(upload_router, tags=["documents"])
 app.include_router(documents_router, tags=["documents"])
+app.include_router(graph_router, tags=["graph"])
 app.include_router(excel_router, tags=["excel"])
+app.include_router(quiz_router, tags=["quiz"])
 
 
 @app.get("/")
@@ -90,4 +97,14 @@ async def root():
         "documents": "/documents",
         "excel_analyze": "/documents/{id}/analyze",
         "excel_charts": "/documents/{id}/charts",
+        "excel_custom_chart": "/documents/{id}/charts/custom",
+        "excel_ask": "/documents/{id}/excel/ask",
+        "multi_doc_ask": "/documents/multi/ask",
+        "graph_sync": "/documents/{id}/graph/sync",
+        "graph_get": "/documents/{id}/graph",
+        "quiz_generate": "/documents/{id}/quiz/generate",
+        "quiz_adaptive": "/documents/{id}/quiz/adaptive/generate",
+        "concept_mastery": "/documents/{id}/concepts/mastery",
+        "quiz_get": "/documents/{id}/quiz",
+        "quiz_submit": "/quizzes/{id}/submit",
     }

@@ -9,12 +9,20 @@ from supabase import Client
 from app.core.auth import AuthUser
 from app.core.cache import cache_get, cache_set, check_rate_limit
 from app.core.exceptions import NotFoundException, RateLimitException
+from app.core.safe_errors import GENERIC_EXCEL_ERROR
 from app.core.resilience import storage_circuit, with_retry
 from app.core.yaml_config import get_yaml_config
-from app.services.excel_charts import build_charts_from_plan, parse_chart_plan
+from app.services.excel_charts import (
+    CustomChartRequest,
+    build_charts_from_plan,
+    build_custom_chart,
+    parse_chart_plan,
+)
 from app.services.excel_profiling import profile_dataframe, read_dataframe
 from app.services.llm_client import (
+    answer_excel_question,
     excel_cache_key,
+    excel_question_cache_key,
     generate_excel_chart_plan,
     generate_excel_summary,
 )
@@ -80,7 +88,7 @@ async def get_excel_analysis(client: Client, document_id: str, user: AuthUser) -
     if doc["file_type"] != "excel":
         raise FileException("Excel analysis is only available for spreadsheet uploads")
 
-    cache_key = excel_cache_key(document_id, doc.get("file_hash"))
+    cache_key = excel_cache_key(user.id, document_id, doc.get("file_hash"))
     cached = await cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
@@ -119,7 +127,7 @@ async def analyze_excel(client: Client, document_id: str, user: AuthUser) -> dic
     if doc["status"] == "processing":
         raise FileException("Spreadsheet is already being analyzed", status_code=409)
 
-    cache_key = excel_cache_key(document_id, doc.get("file_hash"))
+    cache_key = excel_cache_key(user.id, document_id, doc.get("file_hash"))
     cached = await cache_get(cache_key)
     if cached:
         return {**cached, "cached": True}
@@ -182,8 +190,101 @@ async def analyze_excel(client: Client, document_id: str, user: AuthUser) -> dic
         ).eq("id", document_id).execute()
         raise
     except Exception as exc:
-        message = str(exc)
+        log.exception("Excel analysis failed", document_id=document_id, user_id=user.id)
         client.table("documents").update(
-            {"status": "failed", "error_message": message}
+            {"status": "failed", "error_message": GENERIC_EXCEL_ERROR}
         ).eq("id", document_id).execute()
-        raise FileException(f"Excel analysis failed: {message}", status_code=500) from exc
+        raise FileException(GENERIC_EXCEL_ERROR, status_code=500) from exc
+
+
+async def create_custom_excel_chart(
+    client: Client,
+    document_id: str,
+    user: AuthUser,
+    request: CustomChartRequest,
+) -> dict:
+    doc = _get_owned_document(client, document_id, user)
+    if doc["file_type"] != "excel":
+        raise FileException("Custom charts are only available for spreadsheet uploads")
+    if doc["status"] != "ready" or not doc.get("excel_profile"):
+        raise FileException("Analyze the spreadsheet before building custom charts", status_code=409)
+
+    raw_bytes = await _download_document_bytes(client, doc)
+    df = read_dataframe(raw_bytes, doc["filename"])
+
+    try:
+        chart = build_custom_chart(df, request)
+    except ValueError as exc:
+        raise FileException(str(exc), status_code=400) from exc
+
+    log.info(
+        "Custom Excel chart built",
+        document_id=document_id,
+        user_id=user.id,
+        chart_type=request.chart_type,
+        x_column=request.x_column,
+        y_column=request.y_column,
+    )
+    return {"chart": chart}
+
+
+async def ask_excel(
+    client: Client,
+    document_id: str,
+    user: AuthUser,
+    *,
+    question: str,
+) -> dict:
+    question = question.strip()
+    if not question:
+        raise FileException("Question is required")
+
+    cfg = get_yaml_config().excel
+    allowed, retry_after = await check_rate_limit(
+        key=f"excel_chat:{user.id}",
+        limit=cfg.chat_rate_limit_per_min,
+        window_seconds=60,
+    )
+    if not allowed:
+        raise RateLimitException(
+            f"Excel chat rate limit reached ({cfg.chat_rate_limit_per_min}/min)",
+            retry_after=retry_after,
+        )
+
+    doc = _get_owned_document(client, document_id, user)
+    if doc["file_type"] != "excel":
+        raise FileException("Excel chat is only available for spreadsheet uploads")
+    if doc["status"] != "ready" or not doc.get("excel_profile"):
+        raise FileException("Analyze the spreadsheet before asking questions", status_code=409)
+
+    cache_key = excel_question_cache_key(user.id, document_id, doc.get("file_hash"), question)
+    cached = await cache_get(cache_key)
+    if cached:
+        return {**cached, "cached": True}
+
+    profile = doc.get("excel_profile") or {}
+    charts = doc.get("excel_charts") or []
+    summary = doc.get("excel_summary") or ""
+
+    try:
+        llm_result = await answer_excel_question(
+            question=question,
+            profile=profile,
+            summary=summary,
+            charts=charts,
+            filename=doc["filename"],
+        )
+    except Exception as exc:
+        log.exception("Excel chat failed", document_id=document_id, user_id=user.id)
+        raise FileException(GENERIC_EXCEL_ERROR, status_code=500) from exc
+
+    payload = {
+        "document_id": document_id,
+        "question": question,
+        "answer": llm_result["answer"],
+        "sources": llm_result["sources"],
+        "cached": False,
+    }
+    await cache_set(cache_key, payload, get_yaml_config().cache.chat_ttl)
+    log.info("Excel chat answered", document_id=document_id, user_id=user.id)
+    return payload
