@@ -4,25 +4,34 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   apiFetch,
+  type AskResponse,
+  type DocumentReviewOption,
   type DocumentSummary,
   type MultiAskResponse,
+  type MultiRetrieveResponse,
+  type SourceCitation,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DocumentReviewPicker } from "@/components/documents/document-review-picker";
+import { SourceCitations } from "@/components/documents/source-citations";
 
 type ChatMessage = {
   question: string;
   answer: string;
+  sources?: SourceCitation[];
   cached?: boolean;
-  retrievalMethod?: string;
-  documentIds: string[];
 };
 
 export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [question, setQuestion] = useState("");
+  const [pendingDocuments, setPendingDocuments] = useState<DocumentReviewOption[]>([]);
+  const [pendingQuestion, setPendingQuestion] = useState("");
+  const [approvedDocumentIds, setApprovedDocumentIds] = useState<Set<string>>(new Set());
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [retrieving, setRetrieving] = useState(false);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -30,6 +39,7 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
   const readyDocuments = documents.filter(
     (doc) => doc.file_type === "document" && doc.status === "ready",
   );
+  const hitlMode = selectedIds.length > 1;
 
   useEffect(() => {
     async function loadSession() {
@@ -43,6 +53,9 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
   }, []);
 
   const toggleDocument = useCallback((documentId: string) => {
+    setPendingDocuments([]);
+    setPendingQuestion("");
+    setApprovedDocumentIds(new Set());
     setSelectedIds((current) =>
       current.includes(documentId)
         ? current.filter((id) => id !== documentId)
@@ -50,10 +63,97 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
     );
   }, []);
 
-  async function handleAsk(event: React.FormEvent) {
+  const toggleReviewDocument = useCallback((documentId: string) => {
+    setApprovedDocumentIds((current) => {
+      const next = new Set(current);
+      if (next.has(documentId)) {
+        next.delete(documentId);
+      } else {
+        next.add(documentId);
+      }
+      return next;
+    });
+  }, []);
+
+  async function handleAskSingle(event: React.FormEvent) {
     event.preventDefault();
     const trimmed = question.trim();
-    if (!trimmed || selectedIds.length === 0 || !accessToken) {
+    const documentId = selectedIds[0];
+    if (!trimmed || !documentId || !accessToken) {
+      return;
+    }
+
+    setAsking(true);
+    setError(null);
+    try {
+      const response = await apiFetch(`/documents/${documentId}/ask`, accessToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: trimmed }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error || `Ask failed (${response.status})`);
+        return;
+      }
+
+      const data = (await response.json()) as AskResponse;
+      setMessages((prev) => [
+        ...prev,
+        {
+          question: trimmed,
+          answer: data.answer,
+          sources: data.sources,
+          cached: data.cached,
+        },
+      ]);
+      setQuestion("");
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  async function handlePrepareReview(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed || selectedIds.length < 2 || !accessToken) {
+      return;
+    }
+
+    setRetrieving(true);
+    setError(null);
+    setPendingDocuments([]);
+    try {
+      const response = await apiFetch("/documents/multi/retrieve", accessToken, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document_ids: selectedIds, question: trimmed }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        setError(body.error || `Could not prepare document summaries (${response.status})`);
+        return;
+      }
+
+      const data = (await response.json()) as MultiRetrieveResponse;
+      setPendingQuestion(trimmed);
+      setPendingDocuments(data.documents);
+      setApprovedDocumentIds(
+        new Set(data.documents.map((document) => document.document_id)),
+      );
+    } finally {
+      setRetrieving(false);
+    }
+  }
+
+  async function handleContinue() {
+    if (!accessToken || !pendingQuestion || pendingDocuments.length === 0) {
+      return;
+    }
+
+    const approved = [...approvedDocumentIds];
+    if (approved.length === 0) {
+      setError("Select at least one document to continue.");
       return;
     }
 
@@ -63,7 +163,11 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
       const response = await apiFetch("/documents/multi/ask", accessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document_ids: selectedIds, question: trimmed }),
+        body: JSON.stringify({
+          document_ids: selectedIds,
+          question: pendingQuestion,
+          approved_document_ids: approved,
+        }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -75,14 +179,16 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
       setMessages((prev) => [
         ...prev,
         {
-          question: trimmed,
+          question: pendingQuestion,
           answer: data.answer,
+          sources: data.sources,
           cached: data.cached,
-          retrievalMethod: data.retrieval_method,
-          documentIds: data.document_ids,
         },
       ]);
       setQuestion("");
+      setPendingQuestion("");
+      setPendingDocuments([]);
+      setApprovedDocumentIds(new Set());
     } finally {
       setAsking(false);
     }
@@ -91,15 +197,16 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Multi-document chat</CardTitle>
+        <CardTitle>Document chat</CardTitle>
         <CardDescription>
-          Ask questions across multiple processed documents with vector search.
+          Select one or more documents and ask a question. When multiple documents are selected,
+          each document is summarized so you can choose which to answer from.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {readyDocuments.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Upload and process at least one document to use multi-doc chat.
+            Upload and process at least one document to use document chat.
           </p>
         ) : (
           <>
@@ -123,17 +230,41 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
               </div>
             </div>
 
-            <form onSubmit={handleAsk} className="flex gap-2">
+            <form
+              onSubmit={(event) =>
+                void (hitlMode ? handlePrepareReview(event) : handleAskSingle(event))
+              }
+              className="flex gap-2"
+            >
               <Input
                 value={question}
                 onChange={(event) => setQuestion(event.target.value)}
-                placeholder="Ask across selected documents..."
-                disabled={asking || selectedIds.length === 0}
+                placeholder="Ask a question..."
+                disabled={retrieving || asking || selectedIds.length === 0}
               />
-              <Button type="submit" disabled={asking || selectedIds.length === 0}>
-                {asking ? "Thinking..." : "Ask"}
+              <Button type="submit" disabled={retrieving || asking || selectedIds.length === 0}>
+                {retrieving || asking ? "Thinking..." : "Ask"}
               </Button>
             </form>
+
+            {hitlMode && pendingDocuments.length > 0 && (
+              <div className="space-y-3 rounded-md border border-dashed p-4">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Which document should we answer from?</p>
+                  <p className="text-xs text-muted-foreground">
+                    Read the summaries below and select one or more documents for your answer.
+                  </p>
+                </div>
+                <DocumentReviewPicker
+                  documents={pendingDocuments}
+                  selectedIds={approvedDocumentIds}
+                  onToggle={toggleReviewDocument}
+                />
+                <Button type="button" disabled={asking} onClick={() => void handleContinue()}>
+                  {asking ? "Thinking..." : "Continue"}
+                </Button>
+              </div>
+            )}
           </>
         )}
 
@@ -143,17 +274,12 @@ export function MultiDocChatPanel({ documents }: { documents: DocumentSummary[] 
           {messages.map((message, index) => (
             <div key={`${message.question}-${index}`} className="rounded-md border p-4 text-sm">
               <p className="font-medium">Q: {message.question}</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Documents: {message.documentIds.length}
-              </p>
               <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{message.answer}</p>
+              {message.sources && message.sources.length > 0 && (
+                <SourceCitations sources={message.sources} className="mt-3" />
+              )}
               {message.cached && (
                 <p className="mt-2 text-xs text-muted-foreground">Cached response</p>
-              )}
-              {message.retrievalMethod && (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Retrieval: {message.retrievalMethod}
-                </p>
               )}
             </div>
           ))}

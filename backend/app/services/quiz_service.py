@@ -12,6 +12,7 @@ from app.core.auth import AuthUser
 from app.core.cache import cache_get, cache_set, check_rate_limit
 from app.core.exceptions import NotFoundException, RateLimitException
 from app.core.yaml_config import get_yaml_config
+from app.core.migration_guard import run_or_raise_phase2
 from app.services.llm_client import (
     adaptive_quiz_cache_key,
     generate_quiz_draft,
@@ -215,8 +216,8 @@ def _chunks_for_concepts(
     if not concept_ids:
         return [], []
 
-    concepts = (
-        client.table("document_concepts")
+    concepts = run_or_raise_phase2(
+        lambda: client.table("document_concepts")
         .select("concept_id, chunk_indexes")
         .eq("document_id", document_id)
         .in_("concept_id", concept_ids)
@@ -357,7 +358,7 @@ async def generate_adaptive_quiz(
     return {**payload, "target_concepts": weak}
 
 
-async def get_document_quiz(client: Client, document_id: str, user: AuthUser) -> dict[str, Any]:
+async def get_document_quiz(client: Client, document_id: str, user: AuthUser) -> dict[str, Any] | None:
     _get_owned_document(client, document_id, user)
     quiz_result = (
         client.table("quizzes")
@@ -368,7 +369,7 @@ async def get_document_quiz(client: Client, document_id: str, user: AuthUser) ->
         .execute()
     )
     if not quiz_result.data:
-        raise NotFoundException("No quiz found for this document")
+        return None
 
     quiz = quiz_result.data[0]
     questions = (

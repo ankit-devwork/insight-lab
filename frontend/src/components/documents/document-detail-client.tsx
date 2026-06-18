@@ -14,13 +14,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { DocumentQuizPanel } from "@/components/documents/document-quiz-panel";
-import { ConceptGraphPanel } from "@/components/documents/concept-graph-panel";
+import { SourceCitations } from "@/components/documents/source-citations";
+import type { SourceCitation } from "@/lib/api";
 
 type ChatMessage = {
   question: string;
   answer: string;
+  sources?: SourceCitation[];
   cached?: boolean;
-  retrievalMethod?: string;
 };
 
 export function DocumentDetailClient({ documentId }: { documentId: string }) {
@@ -67,8 +68,10 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
     if (!response.ok) {
       return;
     }
-    const data = (await response.json()) as QuizResponse;
-    setExistingQuiz(data);
+    const data = (await response.json()) as QuizResponse & { quiz?: null };
+    if (data.quiz_id) {
+      setExistingQuiz(data);
+    }
   }, [documentId]);
 
   const loadSummary = useCallback(async (token: string) => {
@@ -160,8 +163,8 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
         {
           question: trimmed,
           answer: data.answer,
+          sources: data.sources,
           cached: data.cached,
-          retrievalMethod: data.retrieval_method,
         },
       ]);
       setQuestion("");
@@ -260,12 +263,6 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
         </CardContent>
       </Card>
 
-      <ConceptGraphPanel
-        documentId={documentId}
-        ready={document.status === "ready"}
-        accessToken={accessToken}
-      />
-
       <DocumentQuizPanel
         documentId={documentId}
         ready={document.status === "ready"}
@@ -277,7 +274,7 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
         <CardHeader>
           <CardTitle>Ask this document</CardTitle>
           <CardDescription>
-            Answers use pgvector semantic search over embedded chunks (keyword fallback if needed)
+            Answers are grounded in passages from this document. Sources are shown below each reply.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -298,13 +295,11 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
               <div key={`${message.question}-${index}`} className="rounded-md border p-4 text-sm">
                 <p className="font-medium">Q: {message.question}</p>
                 <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{message.answer}</p>
+                {message.sources && message.sources.length > 0 && (
+                  <SourceCitations sources={message.sources} className="mt-3" />
+                )}
                 {message.cached && (
                   <p className="mt-2 text-xs text-muted-foreground">Cached response</p>
-                )}
-                {message.retrievalMethod && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Retrieval: {message.retrievalMethod}
-                  </p>
                 )}
               </div>
             ))}
