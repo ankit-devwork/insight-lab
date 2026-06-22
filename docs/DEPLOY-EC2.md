@@ -1,6 +1,11 @@
 # Deploy InsightLab on EC2 (pilot)
 
+> **Recommended:** use [DEPLOY-ECR.md](DEPLOY-ECR.md) (build locally → ECR → Docker on EC2).  
+> This guide is the **fallback** manual path (git clone + Python venv + systemd).
+
 Minimal production setup: **FastAPI on EC2** (nginx + uvicorn + systemd), **Next.js on Vercel**, **Supabase** hosted.
+
+**Repository:** [github.com/ankit-devwork/insight-lab](https://github.com/ankit-devwork/insight-lab)
 
 ## Before you deploy
 
@@ -41,36 +46,39 @@ User → Vercel (Next.js) → Supabase Auth + DB + Storage
 
 ## 2. Base setup
 
-SSH into the instance:
+SSH into the instance — see [DEPLOY-ECR.md — Connect to EC2](DEPLOY-ECR.md#part-0--connect-to-ec2-from-windows).
 
 ```bash
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y git nginx certbot python3-certbot-nginx docker.io docker-compose-plugin
+sudo apt install -y git nginx certbot python3-certbot-nginx docker.io docker-compose-v2
 
 sudo usermod -aG docker $USER
 # Log out and back in so the docker group applies
 ```
+
+Verify Docker Compose: `docker compose version` (use a **space**, not `docker-compose`).
+
+For the API itself, this guide uses **Python on the host** — not ECR. If you pushed an image to ECR, use [DEPLOY-ECR.md](DEPLOY-ECR.md) instead and skip sections 3–5 below.
 
 ---
 
 ## 3. Clone and install backend
 
 ```bash
-git clone https://github.com/ankit-devwork/the-learning-curve-labs.git
-cd the-learning-curve-labs/insight-lab
+git clone https://github.com/ankit-devwork/insight-lab.git
+cd insight-lab
 
 # Redis + Neo4j (adaptive quiz and graph sync use Neo4j)
 docker compose up -d
 
 cd backend
+sudo apt install -y python3-venv   # required on Ubuntu before venv works
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 
-# pycorekit (required)
-pip install -e ../../pycorekit
-# Or from GitHub:
-# pip install "git+https://github.com/ankit-devwork/the-learning-curve-labs.git@main#subdirectory=pycorekit"
+# pycorekit (required — lives in the-learning-curve-labs monorepo)
+pip install "git+https://github.com/ankit-devwork/the-learning-curve-labs.git@main#subdirectory=pycorekit"
 
 pip install -r requirements.txt
 ```
@@ -142,9 +150,9 @@ Requires=docker.service
 
 [Service]
 User=ubuntu
-WorkingDirectory=/home/ubuntu/the-learning-curve-labs/insight-lab/backend
-Environment="PATH=/home/ubuntu/the-learning-curve-labs/insight-lab/backend/.venv/bin"
-ExecStart=/home/ubuntu/the-learning-curve-labs/insight-lab/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
+WorkingDirectory=/home/ubuntu/insight-lab/backend
+Environment="PATH=/home/ubuntu/insight-lab/backend/.venv/bin"
+ExecStart=/home/ubuntu/insight-lab/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
 RestartSec=5
 

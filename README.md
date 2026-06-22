@@ -23,7 +23,7 @@ Part of [The Learning Curve Labs](https://github.com/ankit-devwork/the-learning-
 | Backend | FastAPI, LangGraph, LiteLLM |
 | Observability | pycorekit, Langfuse |
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design. For production on AWS, see [docs/DEPLOY-EC2.md](docs/DEPLOY-EC2.md).
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full system design. For production, see [docs/DEPLOY-ECR.md](docs/DEPLOY-ECR.md) (recommended) or [docs/DEPLOY-EC2.md](docs/DEPLOY-EC2.md) (manual venv).
 
 ## Repository structure
 
@@ -87,11 +87,13 @@ npm run dev
 
 See [frontend/README.md](frontend/README.md) for Google OAuth setup in Supabase.
 
-## Deploy (EC2 pilot)
+## Deploy (ECR + EC2 pilot)
 
-Minimal production setup: API on EC2 (nginx + uvicorn), frontend on Vercel, Supabase hosted.
+**Recommended:** build the API Docker image locally, push to **Amazon ECR**, run on EC2 with `docker compose -f docker-compose.ecr.yml`. Frontend on **Vercel**, Supabase hosted. **No Python or venv needed on EC2.**
 
-See **[docs/DEPLOY-EC2.md](docs/DEPLOY-EC2.md)** for step-by-step instructions (systemd, nginx, env template, Supabase Auth URLs, smoke tests).
+See **[docs/DEPLOY-ECR.md](docs/DEPLOY-ECR.md)** for SSH, build/push scripts, Docker install, and troubleshooting.
+
+Fallback (git clone + uvicorn on host): [docs/DEPLOY-EC2.md](docs/DEPLOY-EC2.md).
 
 ## Environment variables
 
