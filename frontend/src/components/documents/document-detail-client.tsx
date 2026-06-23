@@ -17,6 +17,10 @@ import { Input } from "@/components/ui/input";
 import { DocumentQuizPanel } from "@/components/documents/document-quiz-panel";
 import { SourceCitations } from "@/components/documents/source-citations";
 import { cn } from "@/lib/utils";
+import {
+  DocumentDetailSkeleton,
+  ProcessingContentSkeleton,
+} from "@/components/ui/loading-skeletons";
 import type { SourceCitation } from "@/lib/api";
 
 type DetailPanel = "quiz" | "ask";
@@ -179,7 +183,7 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading document...</p>;
+    return <DocumentDetailSkeleton />;
   }
 
   if (!document) {
@@ -188,15 +192,23 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link href="/dashboard" className="text-sm text-muted-foreground hover:underline">
-            ← Back to dashboard
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">
+        <div className="min-w-0">
+          <Link
+            href="/dashboard"
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+          >
+            ← Back to workspace
           </Link>
-          <h2 className="mt-2 text-2xl font-semibold">{document.filename}</h2>
-          <p className="text-sm text-muted-foreground capitalize">
-            {document.file_type} · {document.status}
-          </p>
+          <h2 className="mt-2 truncate text-2xl font-semibold tracking-tight">{document.filename}</h2>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium capitalize text-muted-foreground">
+              {document.file_type}
+            </span>
+            <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium capitalize text-muted-foreground">
+              {document.status}
+            </span>
+          </div>
         </div>
         <div className="flex gap-2">
           {(document.status === "ready" || document.status === "failed") && (
@@ -273,15 +285,15 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
         />
       )}
 
-      <Card>
+      <Card className="shadow-sm">
         <CardHeader>
-          <CardTitle>Summary</CardTitle>
+          <CardTitle className="text-lg">Summary</CardTitle>
           <CardDescription>
             AI-generated overview — read this first before asking questions or taking a quiz.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {processing && <p className="text-sm text-muted-foreground">Processing document...</p>}
+          {processing && <ProcessingContentSkeleton lines={6} />}
           {!processing && summary && (
             <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
               {summary}
@@ -334,9 +346,9 @@ export function DocumentDetailClient({ documentId }: { documentId: string }) {
               activePanel !== "ask" && "hidden lg:block",
             )}
           >
-            <Card>
+            <Card className="shadow-sm">
               <CardHeader>
-                <CardTitle>Ask this document</CardTitle>
+                <CardTitle className="text-lg">Ask this document</CardTitle>
                 <CardDescription>
                   Type a question in plain English. The answer is based on this file only — sources
                   appear below each reply.

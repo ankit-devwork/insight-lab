@@ -10,6 +10,11 @@ import { FeatureGuide } from "@/components/ui/feature-guide";
 import { Input } from "@/components/ui/input";
 import { ExcelChartView } from "@/components/excel/excel-chart-view";
 import { ExcelChartBuilder } from "@/components/excel/excel-chart-builder";
+import {
+  ChartBuilderSkeleton,
+  ExcelDetailSkeleton,
+  ProcessingContentSkeleton,
+} from "@/components/ui/loading-skeletons";
 
 type ExcelChatMessage = {
   question: string;
@@ -163,18 +168,23 @@ export function ExcelDetailClient({ documentId }: { documentId: string }) {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading spreadsheet...</p>;
+    return <ExcelDetailSkeleton />;
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <Link href="/dashboard" className="text-sm text-muted-foreground hover:underline">
-            ← Back to dashboard
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b pb-6">
+        <div className="min-w-0">
+          <Link
+            href="/dashboard"
+            className="text-sm font-medium text-muted-foreground transition-colors hover:text-primary"
+          >
+            ← Back to workspace
           </Link>
-          <h2 className="mt-2 text-2xl font-semibold">{filename}</h2>
-          <p className="text-sm text-muted-foreground capitalize">excel · {status}</p>
+          <h2 className="mt-2 truncate text-2xl font-semibold tracking-tight">{filename}</h2>
+          <span className="mt-2 inline-block rounded-md bg-muted px-2 py-0.5 text-xs font-medium capitalize text-muted-foreground">
+            excel · {status}
+          </span>
         </div>
         <Button
           type="button"
@@ -196,7 +206,17 @@ export function ExcelDetailClient({ documentId }: { documentId: string }) {
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
-      {analyzing && <p className="text-sm text-muted-foreground">Analyzing spreadsheet...</p>}
+      {analyzing && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Insights</CardTitle>
+            <CardDescription>Analyzing your spreadsheet…</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ProcessingContentSkeleton lines={5} />
+          </CardContent>
+        </Card>
+      )}
 
       {status === "ready" && (
         <FeatureGuide
@@ -307,6 +327,8 @@ export function ExcelDetailClient({ documentId }: { documentId: string }) {
           </CardContent>
         </Card>
       ))}
+
+      {analyzing && !analysis && <ChartBuilderSkeleton />}
 
       {!analyzing && !analysis && status !== "ready" && (
         <p className="text-sm text-muted-foreground">Charts will appear after analysis.</p>
