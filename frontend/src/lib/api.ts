@@ -55,6 +55,8 @@ export type AskResponse = {
   retrieval_method?: "vector" | "keyword";
   chunk_similarities?: number[];
   cached?: boolean;
+  cache_match?: string;
+  similarity?: number;
   correlation_id?: string;
 };
 
@@ -81,6 +83,7 @@ export type QuizResponse = {
   title: string;
   question_type: "scq" | "mcq" | "true_false";
   difficulty: string;
+  published?: boolean;
   questions: QuizQuestion[];
   cached?: boolean;
   target_concepts?: ConceptMasteryItem[];
@@ -117,6 +120,8 @@ export type ConceptMasteryItem = {
   correct: number;
   percent?: number | null;
   last_attempt_at?: string | null;
+  document_id?: string;
+  document_filename?: string;
 };
 
 export type ConceptMasteryResponse = {
@@ -184,6 +189,8 @@ export type MultiAskResponse = {
   cited_documents?: string[];
   retrieval_method?: "vector" | "keyword";
   cached?: boolean;
+  cache_match?: string;
+  similarity?: number;
   correlation_id?: string;
 };
 
@@ -244,6 +251,8 @@ export type ExcelAskResponse = {
   answer: string;
   sources?: string[];
   cached?: boolean;
+  cache_match?: string;
+  similarity?: number;
   correlation_id?: string;
 };
 
@@ -280,6 +289,35 @@ export type WorkspaceSummary = {
   description?: string | null;
   created_at: string;
   updated_at: string;
+  access_role?: "owner" | "editor" | "viewer" | null;
+  is_owner?: boolean;
+  shared?: boolean;
+};
+
+export type QuizQuestionEditable = QuizQuestion & {
+  correct_option_index?: number;
+  explanation?: string | null;
+};
+
+export type CoursePackDocumentResult = {
+  document_id: string;
+  filename: string;
+  artifacts: {
+    summary?: string;
+    quiz_id?: string;
+    flashcard_set_id?: string;
+    study_guide_id?: string;
+    audio_title?: string;
+    audio_script?: string;
+  };
+  errors: string[];
+};
+
+export type CoursePackResponse = {
+  workspace_id: string;
+  document_count: number;
+  documents: CoursePackDocumentResult[];
+  correlation_id?: string;
 };
 
 export type WorkspaceStats = {
@@ -338,4 +376,23 @@ export type DocumentChunkResponse = {
   content: string;
   preview: string;
   truncated: boolean;
+};
+
+export type AudioOverviewResponse = {
+  document_id: string;
+  title: string;
+  script: string;
+  estimated_minutes?: number;
+  cached?: boolean;
+  correlation_id?: string;
+};
+
+export type ExcelPreviewResponse = {
+  document_id: string;
+  columns: string[];
+  rows: string[][];
+  preview_rows: number;
+  total_rows: number;
+  total_columns: number;
+  correlation_id?: string;
 };

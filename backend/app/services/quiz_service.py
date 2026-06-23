@@ -17,25 +17,21 @@ from app.services.llm_client import (
     adaptive_quiz_cache_key,
     generate_quiz_draft,
     quiz_cache_key,
+    workspace_adaptive_quiz_cache_key,
 )
 from app.services.mastery_service import get_weak_concepts, record_quiz_mastery
-from app.services.quiz_questions import draft_to_rows, parse_quiz_draft
+from app.services.quiz_questions import draft_to_rows, parse_quiz_draft, QuizQuestionDraft
+from app.services.workspace_access import (
+    can_edit_document,
+    get_accessible_document,
+    require_editable_document,
+)
 
 log = get_logger("quiz")
 
 
 def _get_owned_document(client: Client, document_id: str, user: AuthUser) -> dict:
-    result = (
-        client.table("documents")
-        .select("*")
-        .eq("id", document_id)
-        .eq("owner_id", user.id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        raise NotFoundException("Document not found")
-    return result.data[0]
+    return get_accessible_document(client, document_id, user, min_role="viewer")
 
 
 def _get_owned_quiz(client: Client, quiz_id: str, user: AuthUser) -> dict:
@@ -87,6 +83,7 @@ def _serialize_quiz(
         "title": quiz["title"],
         "question_type": quiz["question_type"],
         "difficulty": quiz["difficulty"],
+        "published": quiz.get("published", True),
         "questions": [
             _serialize_question_for_client(question, include_answers=include_answers)
             for question in sorted(questions, key=lambda row: row["sort_order"])
@@ -137,7 +134,7 @@ async def generate_document_quiz(
         )
         return _serialize_quiz(quiz, questions, include_answers=False, cached=True)
 
-    doc = _get_owned_document(client, document_id, user)
+    doc = require_editable_document(client, document_id, user)
     if doc["file_type"] != "document":
         raise FileException("Quizzes are only available for document uploads")
     if doc["status"] != "ready":
@@ -183,7 +180,7 @@ async def generate_document_quiz(
         "title": draft.title.strip() or f"Quiz: {doc['filename']}",
         "question_type": question_type,
         "difficulty": difficulty,
-        "published": True,
+        "published": False,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     client.table("quizzes").insert(quiz_row).execute()
@@ -294,7 +291,7 @@ async def generate_adaptive_quiz(
             "target_concepts": weak,
         }
 
-    doc = _get_owned_document(client, document_id, user)
+    doc = require_editable_document(client, document_id, user)
     if doc["file_type"] != "document":
         raise FileException("Quizzes are only available for document uploads")
     if doc["status"] != "ready":
@@ -340,7 +337,7 @@ async def generate_adaptive_quiz(
         "title": draft.title.strip() or f"Adaptive quiz: {doc['filename']}",
         "question_type": question_type,
         "difficulty": difficulty,
-        "published": True,
+        "published": False,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     client.table("quizzes").insert(quiz_row).execute()
@@ -356,6 +353,146 @@ async def generate_adaptive_quiz(
         weak_concepts=weak_ids,
     )
     return {**payload, "target_concepts": weak}
+
+
+async def generate_workspace_adaptive_quiz(
+    client: Client,
+    workspace_id: str,
+    user: AuthUser,
+    *,
+    question_type: str,
+    difficulty: str,
+    num_questions: int,
+) -> dict[str, Any]:
+    from app.services.mastery_service import get_workspace_weak_concepts
+    from app.services.workspace_access import require_workspace_role
+
+    cfg = get_yaml_config().adaptive_quiz
+    allowed, retry_after = await check_rate_limit(
+        key=f"workspace_adaptive_quiz:{user.id}",
+        limit=cfg.generate_rate_limit_per_min,
+        window_seconds=60,
+    )
+    if not allowed:
+        raise RateLimitException(
+            f"Adaptive quiz limit reached ({cfg.generate_rate_limit_per_min}/min)",
+            retry_after=retry_after,
+        )
+
+    require_workspace_role(client, workspace_id, user, min_role="editor")
+    weak = await get_workspace_weak_concepts(client, workspace_id, user)
+    if not weak:
+        raise FileException(
+            "Complete a quiz on at least one document in this set first. "
+            "We'll then suggest topics to practice across the set.",
+            status_code=409,
+        )
+
+    weak_ids = [row["concept_id"] for row in weak]
+    weak_names = [row["name"] for row in weak]
+    cache_key = workspace_adaptive_quiz_cache_key(
+        user.id,
+        workspace_id,
+        _weak_concepts_hash(weak_ids),
+    )
+    cached = await cache_get(cache_key)
+    if cached and cached.get("quiz_id"):
+        quiz = _get_owned_quiz(client, cached["quiz_id"], user)
+        questions = (
+            client.table("quiz_questions")
+            .select("*")
+            .eq("quiz_id", quiz["id"])
+            .order("sort_order")
+            .execute()
+            .data
+            or []
+        )
+        return {
+            **_serialize_quiz(quiz, questions, include_answers=False, cached=True),
+            "workspace_id": workspace_id,
+            "target_concepts": weak,
+        }
+
+    quiz_cfg = get_yaml_config().quizzes
+    num_questions = min(max(num_questions, 1), quiz_cfg.max_questions)
+    context_chunks: list[str] = []
+    chunk_indexes: list[int] = []
+    primary_document_id: str | None = None
+    chunks_per_concept = max(1, quiz_cfg.max_context_chunks // max(len(weak), 1))
+
+    for concept in weak:
+        document_id = concept["document_id"]
+        sampled, indexes = _chunks_for_concepts(
+            client,
+            document_id=document_id,
+            concept_ids=[concept["concept_id"]],
+            max_chunks=chunks_per_concept,
+        )
+        if not sampled:
+            continue
+        if primary_document_id is None:
+            primary_document_id = document_id
+        context_chunks.extend(row["content"] for row in sampled)
+        chunk_indexes.extend(indexes)
+        if len(context_chunks) >= quiz_cfg.max_context_chunks:
+            break
+
+    if not context_chunks or not primary_document_id:
+        raise FileException(
+            "No chunks found for weak concepts; sync concept graphs for documents in this set",
+            status_code=409,
+        )
+
+    context_chunks = context_chunks[: quiz_cfg.max_context_chunks]
+    primary_doc = _get_owned_document(client, primary_document_id, user)
+    raw = await generate_quiz_draft(
+        context_chunks=context_chunks,
+        filename=primary_doc["filename"],
+        question_type=question_type,
+        difficulty=difficulty,
+        num_questions=num_questions,
+        focus_concepts=weak_names,
+    )
+    try:
+        draft = parse_quiz_draft(raw, max_questions=num_questions)
+    except (ValueError, Exception) as exc:
+        raise FileException(f"Invalid quiz payload from LLM: {exc}", status_code=502) from exc
+
+    quiz_id = str(uuid4())
+    question_rows = draft_to_rows(draft, chunk_indexes=chunk_indexes[: len(draft.questions)])
+    for index, row in enumerate(question_rows):
+        row["id"] = str(uuid4())
+        row["quiz_id"] = quiz_id
+        if not row.get("concept_id") and index < len(weak_ids):
+            row["concept_id"] = weak_ids[index % len(weak_ids)]
+
+    quiz_row = {
+        "id": quiz_id,
+        "document_id": primary_document_id,
+        "workspace_id": workspace_id,
+        "title": draft.title.strip() or "Adaptive quiz: study set",
+        "question_type": question_type,
+        "difficulty": difficulty,
+        "published": False,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    client.table("quizzes").insert(quiz_row).execute()
+    client.table("quiz_questions").insert(question_rows).execute()
+
+    payload = _serialize_quiz(quiz_row, question_rows, include_answers=False, cached=False)
+    await cache_set(cache_key, {"quiz_id": quiz_id}, get_yaml_config().cache.quiz_ttl)
+    log.info(
+        "Workspace adaptive quiz generated",
+        quiz_id=quiz_id,
+        workspace_id=workspace_id,
+        user_id=user.id,
+        weak_concepts=weak_ids,
+    )
+    return {
+        **payload,
+        "workspace_id": workspace_id,
+        "target_concepts": weak,
+    }
 
 
 async def get_document_quiz(client: Client, document_id: str, user: AuthUser) -> dict[str, Any] | None:
@@ -382,6 +519,112 @@ async def get_document_quiz(client: Client, document_id: str, user: AuthUser) ->
         or []
     )
     return _serialize_quiz(quiz, questions, include_answers=False, cached=False)
+
+
+async def update_quiz_question(
+    client: Client,
+    quiz_id: str,
+    question_id: str,
+    user: AuthUser,
+    *,
+    question_text: str | None = None,
+    options: list[str] | None = None,
+    correct_option_index: int | None = None,
+    explanation: str | None = None,
+) -> dict[str, Any]:
+    quiz = _get_owned_quiz(client, quiz_id, user)
+    if not can_edit_document(client, quiz["document_id"], user):
+        raise FileException("You do not have permission to edit this quiz", status_code=403)
+
+    question_result = (
+        client.table("quiz_questions")
+        .select("*")
+        .eq("id", question_id)
+        .eq("quiz_id", quiz_id)
+        .limit(1)
+        .execute()
+    )
+    if not question_result.data:
+        raise NotFoundException("Quiz question not found")
+    current = question_result.data[0]
+
+    draft = QuizQuestionDraft(
+        question_text=question_text if question_text is not None else current["question_text"],
+        options=options if options is not None else current["options"],
+        correct_option_index=(
+            correct_option_index
+            if correct_option_index is not None
+            else current["correct_option_index"]
+        ),
+        explanation=explanation if explanation is not None else current.get("explanation"),
+    )
+    updated = (
+        client.table("quiz_questions")
+        .update(
+            {
+                "question_text": draft.question_text,
+                "options": draft.options,
+                "correct_option_index": draft.correct_option_index,
+                "explanation": draft.explanation,
+            }
+        )
+        .eq("id", question_id)
+        .eq("quiz_id", quiz_id)
+        .execute()
+    )
+    if not updated.data:
+        raise FileException("Failed to update quiz question", status_code=500)
+
+    client.table("quizzes").update(
+        {"published": False, "updated_at": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", quiz_id).execute()
+
+    row = updated.data[0]
+    return _serialize_question_for_client(row, include_answers=True)
+
+
+async def publish_quiz(client: Client, quiz_id: str, user: AuthUser) -> dict[str, Any]:
+    quiz = _get_owned_quiz(client, quiz_id, user)
+    if not can_edit_document(client, quiz["document_id"], user):
+        raise FileException("You do not have permission to publish this quiz", status_code=403)
+
+    updated = (
+        client.table("quizzes")
+        .update(
+            {"published": True, "updated_at": datetime.now(timezone.utc).isoformat()}
+        )
+        .eq("id", quiz_id)
+        .execute()
+    )
+    if not updated.data:
+        raise FileException("Failed to publish quiz", status_code=500)
+    row = updated.data[0]
+    questions = (
+        client.table("quiz_questions")
+        .select("*")
+        .eq("quiz_id", quiz_id)
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+    return _serialize_quiz(row, questions, include_answers=False, cached=False)
+
+
+async def get_quiz_for_edit(client: Client, quiz_id: str, user: AuthUser) -> dict[str, Any]:
+    quiz = _get_owned_quiz(client, quiz_id, user)
+    if not can_edit_document(client, quiz["document_id"], user):
+        raise FileException("You do not have permission to edit this quiz", status_code=403)
+    questions = (
+        client.table("quiz_questions")
+        .select("*")
+        .eq("quiz_id", quiz_id)
+        .order("sort_order")
+        .execute()
+        .data
+        or []
+    )
+    return _serialize_quiz(quiz, questions, include_answers=True, cached=False)
 
 
 async def submit_quiz_attempt(
@@ -468,6 +711,7 @@ async def submit_quiz_attempt(
     )
     log.info("Quiz submitted", quiz_id=quiz_id, user_id=user.id, score=score, total=total)
     from app.services.document_extras import attach_source_previews
+
     enriched_results = attach_source_previews(
         client,
         document_id=quiz["document_id"],

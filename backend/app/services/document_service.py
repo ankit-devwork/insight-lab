@@ -26,22 +26,14 @@ from app.services.llm_client import (
     question_cache_key,
     summary_cache_key,
 )
+from app.services.semantic_cache import get_semantic_cached_answer, store_semantic_cached_answer
+from app.services.workspace_access import get_accessible_document, require_editable_document
 
 log = get_logger("documents")
 
 
 def _get_owned_document(client: Client, document_id: str, user: AuthUser) -> dict:
-    result = (
-        client.table("documents")
-        .select("*")
-        .eq("id", document_id)
-        .eq("owner_id", user.id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        raise NotFoundException("Document not found")
-    return result.data[0]
+    return get_accessible_document(client, document_id, user, min_role="viewer")
 
 
 def _download_document_bytes(client: Client, document: dict) -> bytes:
@@ -105,7 +97,7 @@ async def process_document(client: Client, document_id: str, user: AuthUser) -> 
             retry_after=retry_after,
         )
 
-    doc = _get_owned_document(client, document_id, user)
+    doc = require_editable_document(client, document_id, user)
     if doc["file_type"] != "document":
         raise FileException("Only document uploads can be processed in Step 1.7")
     if doc["status"] == "processing":
@@ -289,6 +281,15 @@ async def ask_document(
     if cached:
         return {**cached, "cached": True}
 
+    semantic_cached = await get_semantic_cached_answer(
+        user_id=user.id,
+        document_id=document_id,
+        question=question,
+    )
+    if semantic_cached:
+        _get_owned_document(client, document_id, user)
+        return semantic_cached
+
     chunks_result = (
         client.table("document_chunks")
         .select("chunk_index, content")
@@ -334,4 +335,10 @@ async def ask_document(
         "cached": False,
     }
     await cache_set(cache_key, payload, get_yaml_config().cache.chat_ttl)
+    await store_semantic_cached_answer(
+        user_id=user.id,
+        document_id=document_id,
+        question=question,
+        payload=payload,
+    )
     return payload

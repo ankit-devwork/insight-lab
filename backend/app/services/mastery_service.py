@@ -8,22 +8,9 @@ from app.core.auth import AuthUser
 from app.core.exceptions import NotFoundException
 from app.core.migration_guard import PHASE2_MIGRATION_NOTICE, is_missing_phase2_schema, run_or_none_phase2, run_or_raise_phase2
 from app.core.yaml_config import get_yaml_config
+from app.services.workspace_access import get_accessible_document, require_workspace_role
 
 log = get_logger("mastery")
-
-
-def _get_owned_document(client: Client, document_id: str, user: AuthUser) -> dict:
-    result = (
-        client.table("documents")
-        .select("*")
-        .eq("id", document_id)
-        .eq("owner_id", user.id)
-        .limit(1)
-        .execute()
-    )
-    if not result.data:
-        raise NotFoundException("Document not found")
-    return result.data[0]
 
 
 def record_quiz_mastery(
@@ -121,7 +108,7 @@ async def get_concept_mastery(
     document_id: str,
     user: AuthUser,
 ) -> dict[str, Any]:
-    _get_owned_document(client, document_id, user)
+    get_accessible_document(client, document_id, user, min_role="viewer")
     try:
         concepts = run_or_none_phase2(
             lambda: client.table("document_concepts")
@@ -197,6 +184,64 @@ async def get_weak_concepts(
 ) -> list[dict[str, Any]]:
     cfg = get_yaml_config().adaptive_quiz
     mastery = await get_concept_mastery(client, document_id, user)
+    weak: list[dict[str, Any]] = []
+    for item in mastery["concepts"]:
+        attempts = item["attempts"]
+        if attempts < cfg.min_attempts_before_adaptive:
+            continue
+        percent = item.get("percent")
+        if percent is not None and percent < cfg.weak_threshold_percent:
+            weak.append(item)
+
+    weak.sort(key=lambda row: (row.get("percent") or 0, -row["attempts"]))
+    return weak[: cfg.max_weak_concepts]
+
+
+async def get_workspace_concept_mastery(
+    client: Client,
+    workspace_id: str,
+    user: AuthUser,
+) -> dict[str, Any]:
+    from app.services.workspace_access import require_workspace_role
+
+    require_workspace_role(client, workspace_id, user, min_role="viewer")
+    docs = (
+        client.table("documents")
+        .select("id, filename")
+        .eq("workspace_id", workspace_id)
+        .eq("file_type", "document")
+        .eq("status", "ready")
+        .execute()
+        .data
+        or []
+    )
+
+    all_concepts: list[dict[str, Any]] = []
+    for doc in docs:
+        mastery = await get_concept_mastery(client, doc["id"], user)
+        for item in mastery.get("concepts") or []:
+            all_concepts.append(
+                {
+                    **item,
+                    "document_id": doc["id"],
+                    "document_filename": doc["filename"],
+                }
+            )
+
+    return {
+        "workspace_id": workspace_id,
+        "concepts": all_concepts,
+        "document_count": len(docs),
+    }
+
+
+async def get_workspace_weak_concepts(
+    client: Client,
+    workspace_id: str,
+    user: AuthUser,
+) -> list[dict[str, Any]]:
+    cfg = get_yaml_config().adaptive_quiz
+    mastery = await get_workspace_concept_mastery(client, workspace_id, user)
     weak: list[dict[str, Any]] = []
     for item in mastery["concepts"]:
         attempts = item["attempts"]

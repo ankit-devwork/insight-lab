@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -15,9 +16,13 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { MultiDocChatPanel } from "@/components/documents/multi-doc-chat-panel";
 import { UploadDropzone } from "@/components/workspace/upload-dropzone";
 import { WorkspaceStatsPanel } from "@/components/workspace/workspace-stats-panel";
+import { CoursePackPanel } from "@/components/workspace/course-pack-panel";
+import { ShareWorkspacePanel } from "@/components/workspace/share-workspace-panel";
+import { SetQuizPanel } from "@/components/workspace/set-quiz-panel";
 import { useToast } from "@/components/ui/toast";
 import { fetchUploadConfig, type UploadConfigResponse } from "@/lib/api";
 import { FileSpreadsheet, FileText } from "lucide-react";
+import { canEditWorkspace, workspaceRoleLabel } from "@/lib/workspace-roles";
 
 function FileTypeIcon({ fileType }: { fileType: string }) {
   const Icon = fileType === "excel" ? FileSpreadsheet : FileText;
@@ -29,6 +34,7 @@ function FileTypeIcon({ fileType }: { fileType: string }) {
 }
 
 export function StudySetDetailClient({ setId }: { setId: string }) {
+  const router = useRouter();
   const { toast } = useToast();
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -37,6 +43,8 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadAll = useCallback(async () => {
     setError(null);
@@ -49,6 +57,7 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
       setLoading(false);
       return;
     }
+    setAccessToken(session.access_token);
 
     const [workspaceRes, docsRes, statsRes] = await Promise.all([
       apiFetch(`/workspaces/${setId}`, session.access_token),
@@ -132,6 +141,47 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
     }
   }
 
+  async function handleDeleteStudySet() {
+    if (!workspace?.is_owner && workspace?.access_role !== "owner") {
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete "${workspace?.name}" permanently? All files, quizzes, and sharing settings will be removed.`,
+      )
+    ) {
+      return;
+    }
+
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      return;
+    }
+
+    setDeleting(true);
+    try {
+      const response = await apiFetch(`/workspaces/${setId}`, session.access_token, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        toast({
+          title: "Could not delete study set",
+          description: body.error || body.detail,
+          variant: "error",
+        });
+        return;
+      }
+      toast({ title: "Study set deleted", variant: "success" });
+      router.push("/dashboard/sets");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading study set…</p>;
   }
@@ -139,6 +189,9 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
   if (!workspace) {
     return <p className="text-sm text-destructive">{error || "Study set not found"}</p>;
   }
+
+  const canEdit = canEditWorkspace(workspace.access_role);
+  const isOwner = workspace.access_role === "owner" || Boolean(workspace.is_owner);
 
   return (
     <div className="space-y-6">
@@ -148,17 +201,46 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
             ← All study sets
           </Link>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">{workspace.name}</h1>
+          {workspace.access_role ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Your role: {workspaceRoleLabel(workspace.access_role)}
+              {workspace.shared ? " · Shared with you" : ""}
+            </p>
+          ) : null}
           {workspace.description ? (
             <p className="mt-1 max-w-2xl text-muted-foreground">{workspace.description}</p>
           ) : null}
         </div>
-        <Button type="button" variant="outline" onClick={() => void loadAll()}>
-          Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isOwner ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={deleting}
+              data-tour="delete-set"
+              onClick={() => void handleDeleteStudySet()}
+            >
+              {deleting ? "Deleting…" : "Delete study set"}
+            </Button>
+          ) : null}
+          <Button type="button" variant="outline" onClick={() => void loadAll()}>
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {stats ? <WorkspaceStatsPanel stats={stats} /> : null}
 
+      <CoursePackPanel setId={setId} canEdit={canEdit} />
+
+      <ShareWorkspacePanel
+        setId={setId}
+        canManage={canEdit}
+        isOwner={isOwner}
+      />
+
+      {canEdit ? (
       <Card className="shadow-sm">
         <CardHeader>
           <CardTitle>Upload materials</CardTitle>
@@ -177,6 +259,14 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
           />
         </CardContent>
       </Card>
+      ) : (
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle>Upload materials</CardTitle>
+            <CardDescription>Viewer access — you can read and study files but not upload.</CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
       <Card className="shadow-sm">
         <CardHeader>
@@ -187,7 +277,7 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
           {documents.length === 0 ? (
             <p className="text-sm text-muted-foreground">No files yet — upload your first material above.</p>
           ) : (
-            <ul className="divide-y overflow-hidden rounded-xl border">
+            <ul className="divide-y overflow-hidden rounded-xl border" data-tour="file-list">
               {documents.map((doc) => (
                 <li key={doc.id} className="flex items-center justify-between gap-3 px-4 py-3">
                   <div className="flex min-w-0 items-center gap-3">
@@ -216,7 +306,16 @@ export function StudySetDetailClient({ setId }: { setId: string }) {
         </CardContent>
       </Card>
 
-      <MultiDocChatPanel documents={documents} />
+      <SetQuizPanel
+        setId={setId}
+        accessToken={accessToken}
+        canEdit={canEdit}
+        hasReadyDocuments={documents.some(
+          (doc) => doc.file_type === "document" && doc.status === "ready",
+        )}
+      />
+
+      <MultiDocChatPanel documents={documents} workspaceId={setId} />
     </div>
   );
 }

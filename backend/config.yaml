@@ -51,6 +51,17 @@ cache:
   excel_ttl: 86400
   quiz_ttl: 604800
   artifact_ttl: 604800
+  semantic_threshold: 0.85
+  semantic_max_entries: 50
+
+course_pack:
+  generate_rate_limit_per_hour: 3
+
+sharing:
+  invite_preview_rate_limit_per_min: 15
+  invite_accept_rate_limit_per_min: 5
+  invite_create_rate_limit_per_min: 10
+  member_change_rate_limit_per_min: 20
 
 documents:
   chunk_size: 1200
@@ -123,6 +134,15 @@ artifacts:
   study_guide_max_tokens: 2500
   suggested_questions_max_tokens: 400
   chunk_preview_max_chars: 1200
+
+audio_overview:
+  generate_rate_limit_per_min: 5
+  max_tokens: 1200
+  target_words: 450
+
+excel_preview:
+  default_limit: 50
+  max_limit: 200
 
 resilience:
   retry_max_attempts: 4

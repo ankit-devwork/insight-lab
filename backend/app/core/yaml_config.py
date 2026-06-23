@@ -64,6 +64,19 @@ class CacheSection(BaseModel):
     excel_ttl: int = 86400
     quiz_ttl: int = 604800
     artifact_ttl: int = 604800
+    semantic_threshold: float = 0.85
+    semantic_max_entries: int = 50
+
+
+class CoursePackSection(BaseModel):
+    generate_rate_limit_per_hour: int = 3
+
+
+class SharingSection(BaseModel):
+    invite_preview_rate_limit_per_min: int = 15
+    invite_accept_rate_limit_per_min: int = 5
+    invite_create_rate_limit_per_min: int = 10
+    member_change_rate_limit_per_min: int = 20
 
 
 class ExcelSection(BaseModel):
@@ -151,6 +164,17 @@ class ArtifactsSection(BaseModel):
     chunk_preview_max_chars: int = 1200
 
 
+class AudioOverviewSection(BaseModel):
+    generate_rate_limit_per_min: int = 5
+    max_tokens: int = 1200
+    target_words: int = 450
+
+
+class ExcelPreviewSection(BaseModel):
+    default_limit: int = 50
+    max_limit: int = 200
+
+
 class YamlConfig(BaseModel):
     app: AppSection
     logging: LoggingSection
@@ -165,6 +189,10 @@ class YamlConfig(BaseModel):
     adaptive_quiz: AdaptiveQuizSection
     multi_doc: MultiDocSection
     artifacts: ArtifactsSection
+    audio_overview: AudioOverviewSection
+    excel_preview: ExcelPreviewSection
+    course_pack: CoursePackSection
+    sharing: SharingSection
     resilience: ResilienceSection
 
 

@@ -400,20 +400,69 @@ Uses existing tables from `001_initial.sql`: `quizzes`, `quiz_questions`, `quiz_
 
 Migration: `008_phase3_4_study_features.sql` (flashcards, study guides, RLS).
 
-## Next up — Phase 5
+## Next up — Phase 5 (implemented)
 
-- Julius-style inline excel chat canvas
-- Export PNG/CSV
-- Audio overviews
+| Feature | Backend | Frontend |
+|---------|---------|----------|
+| Compare scoped to study sets | `workspace_id` on multi-doc routes | Set picker on `/dashboard/compare` |
+| Export CSV / PNG | Chart data in API responses | Client export on Excel charts |
+| Audio overview | `POST/GET /documents/{id}/audio-overview/*` | Studio + browser TTS player |
+| Set-wide adaptive quiz | `POST /workspaces/{id}/quiz/adaptive/generate` | `SetQuizPanel` on set detail |
+| Julius-style Excel canvas | `GET /documents/{id}/excel/preview` | Split preview + sticky chat layout |
+| Onboarding tour | — | Route-aware tour + **Show tour** in sidebar |
+
+## Phase 6 (implemented)
+
+| Feature | Backend | Frontend |
+|---------|---------|----------|
+| Course pack generator | `POST /workspaces/{id}/course-pack/generate` | `CoursePackPanel` on set detail |
+| Export Anki CSV | `GET /flashcards/{set_id}/export/anki` | Anki CSV button on flashcard study |
+| Export study guide PDF | `GET /study-guides/{guide_id}/export/markdown` | Export PDF (print) on study guide |
+| Semantic cache | `semantic_cache.py` + document `POST /ask` | Cached badge in chat (when returned) |
+| HITL quiz edit | `GET/PATCH /quizzes/{id}/edit`, `POST /publish` | Inline edit + publish in quiz panel |
+| Shared study sets | `workspace_members`, invites, member RLS | Share panel + invite accept page |
+
+Migration: `009_phase6_sharing_quiz_edit.sql` (members, invites, quiz `published`, RLS updates).
+
+## Phase 7 (implemented)
+
+| Feature | Backend | Frontend |
+|---------|---------|----------|
+| Team roles in UI | Set adaptive quiz requires editor; role on workspace API | Upload, studio, course pack, quiz generate/edit gated by `canEdit` |
+| Semantic cache expansion | Multi-doc + Excel ask use embedding index | Cache match label in document, multi-doc, and Excel chat |
+| Set-wide quiz HITL edit | Reuses `/quizzes/{id}/edit`, publish | Edit + publish in `SetQuizPanel` |
+| Security hardening | Editor checks on mutations; migration 010; invite preview | Tour updated; invite UI without email leak |
+| Remove member | `DELETE /workspaces/{id}/members/{user_id}` (owner only) | Remove button in share panel |
+
+Migration: `010_security_hardening.sql` (RLS member insert fix, workspace chunks RPC lockdown).
+
+## Phase 8 (implemented)
+
+| Feature | Backend | Frontend |
+|---------|---------|----------|
+| Revoke pending invite | `DELETE /workspaces/{id}/invites/{invite_id}` (editor+) | Revoke button on pending invites |
+| Leave workspace | `POST /workspaces/{id}/leave` (non-owner) | Leave study set in share panel |
+| Delete study set UI | Existing `DELETE /workspaces/{id}` (owner, keep ≥1 set) | Delete button on set detail header |
+| Invite rate limits | Preview/accept/create/member-change limits in `config.yaml` | — |
+| Cache invalidation on remove/leave | `cache_invalidation.py` clears semantic indexes | — |
+| Role change UI | `PATCH /workspaces/{id}/members/{user_id}` (owner) | Role dropdown in share panel |
+| Deeper artifact RLS | Migration 011 member-aware SELECT/INSERT policies | — |
+
+Migration: `011_phase8_member_rls.sql` (chunks, quizzes, flashcards, study guides, member role updates).
+
+## Next up — Phase 9
+
+- LMS export bundles (SCORM / Canvas)
+- Storage read policies for workspace members (optional if all reads stay backend-only)
 
 ## Security & resilience checklist
 
 | Control | Status |
 |---------|--------|
-| Supabase RLS + Storage policies (migrations 005–006) | Required in prod |
+| Supabase RLS + Storage policies (migrations 005–011) | Required in prod |
 | JWT auth on all document/quiz/excel routes | Done |
 | User-scoped cache keys (summary, chat, quiz, excel) | Done |
-| Rate limits (upload, process, chat, quiz generate/submit, excel) | Done |
+| Rate limits (upload, process, chat, quiz generate/submit, excel, sharing invites) | Done |
 | Grounded LLM prompts + excerpt marker stripping | Done |
 | Retry + circuit breaker on LLM/Storage | Done |
 | Phase 2 migration guard (graceful degradation) | Done |

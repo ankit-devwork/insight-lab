@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import PlainTextResponse, Response
 
 from pycorekit.tracing.decorators import with_observability
 
@@ -11,8 +12,12 @@ from app.services.artifact_service import (
     generate_document_study_guide,
     get_document_flashcards,
     get_document_study_guide,
+    get_flashcard_set,
+    get_study_guide_by_id,
     review_flashcard,
 )
+from app.services.export_utils import flashcards_to_anki_csv, study_guide_to_markdown
+from app.services.audio_overview_service import generate_audio_overview, get_audio_overview
 
 router = APIRouter(tags=["artifacts"])
 
@@ -97,3 +102,73 @@ async def get_study_guide_route(
     result = await get_document_study_guide(get_supabase_client(), document_id, user)
     correlation_id = getattr(request.state, "correlation_id", None)
     return {"study_guide": result, "correlation_id": correlation_id}
+
+
+@router.post("/documents/{document_id}/audio-overview/generate")
+@with_observability("generate_audio_overview")
+async def generate_audio_overview_route(
+    document_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    result = await generate_audio_overview(get_supabase_client(), document_id, user)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return {**result, "correlation_id": correlation_id}
+
+
+@router.get("/documents/{document_id}/audio-overview")
+@with_observability("get_audio_overview")
+async def get_audio_overview_route(
+    document_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    result = await get_audio_overview(get_supabase_client(), document_id, user)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    if result is None:
+        return {
+            "document_id": document_id,
+            "audio_overview": None,
+            "correlation_id": correlation_id,
+        }
+    return {"audio_overview": result, "correlation_id": correlation_id}
+
+
+@router.get("/flashcards/{set_id}/export/anki")
+@with_observability("export_flashcards_anki")
+async def export_flashcards_anki_route(
+    set_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    flashcards = await get_flashcard_set(get_supabase_client(), set_id, user)
+    csv_text = flashcards_to_anki_csv(flashcards.get("cards") or [])
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return PlainTextResponse(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="flashcards-{set_id}.csv"',
+            "X-Correlation-Id": correlation_id or "",
+        },
+    )
+
+
+@router.get("/study-guides/{guide_id}/export/markdown")
+@with_observability("export_study_guide_markdown")
+async def export_study_guide_markdown_route(
+    guide_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    guide = await get_study_guide_by_id(get_supabase_client(), guide_id, user)
+    markdown = study_guide_to_markdown(title=guide["title"], content=guide["content"])
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return PlainTextResponse(
+        content=markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="study-guide-{guide_id}.md"',
+            "X-Correlation-Id": correlation_id or "",
+        },
+    )
