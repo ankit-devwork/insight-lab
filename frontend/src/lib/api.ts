@@ -284,6 +284,24 @@ export type GraphSyncResponse = {
   correlation_id?: string;
 };
 
+export type TeamChatMessage = {
+  id: string;
+  workspace_id: string;
+  author_id: string;
+  author_name: string;
+  body: string;
+  created_at: string;
+  is_own: boolean;
+};
+
+export type WorkspaceMessagesResponse = {
+  workspace_id: string;
+  messages: TeamChatMessage[];
+  has_more: boolean;
+  next_before?: string | null;
+  correlation_id?: string;
+};
+
 export type DocumentReviewOption = {
   document_id: string;
   filename: string;
@@ -553,6 +571,58 @@ export type WorkspaceStudySessionPlan = {
   weak_concepts: ConceptMasteryItem[];
   focus_topic: string | null;
   estimated_minutes: number;
+  correlation_id?: string;
+};
+
+export type StudySessionStepProgress = {
+  id: string;
+  step_index: number;
+  step_type: string;
+  label: string;
+  payload: Record<string, unknown>;
+  status: "pending" | "in_progress" | "completed" | "skipped";
+  started_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type StudySessionRecord = {
+  session_id: string;
+  session_type: "document" | "workspace";
+  workspace_id?: string | null;
+  document_id?: string | null;
+  learning_path_id?: string | null;
+  status: "active" | "completed" | "abandoned";
+  current_step_index: number;
+  progress: {
+    completed_steps: number;
+    total_steps: number;
+    percent: number;
+  };
+  plan: WorkspaceStudySessionPlan | StudySessionPlan | Record<string, unknown>;
+  steps: StudySessionStepProgress[];
+};
+
+export type LearningPathNode = {
+  id: string;
+  sort_order: number;
+  node_kind: "concept" | "document";
+  document_id?: string;
+  document_filename?: string;
+  concept_id?: string;
+  concept_name?: string;
+  topic?: string | null;
+  status: "available" | "needs_practice" | "completed" | "locked";
+  mastery_percent?: number | null;
+};
+
+export type LearningPathResponse = {
+  workspace_id: string;
+  path_id: string | null;
+  title: string;
+  node_count?: number;
+  nodes: LearningPathNode[];
+  migration_required?: boolean;
+  notice?: string;
   correlation_id?: string;
 };
 
