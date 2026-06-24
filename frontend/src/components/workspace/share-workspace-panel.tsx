@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { apiFetch, getTrackingIdFromResponse, parseApiError } from "@/lib/api";
+import { apiFetch, generateTrackingId, getTrackingIdFromResponse, parseApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -26,8 +26,25 @@ type Invite = {
   id: string;
   email: string;
   role: string;
+  token?: string;
   expires_at: string;
 };
+
+function inviteLinkForToken(token: string): string {
+  if (typeof window === "undefined") {
+    return `/invite/${token}`;
+  }
+  return `${window.location.origin}/invite/${token}`;
+}
+
+async function copyInviteLink(link: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(link);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function ShareWorkspacePanel({
   setId,
@@ -55,7 +72,7 @@ export function ShareWorkspacePanel({
   const currentMember = members.find((member) => member.user_id === currentUserId);
   const canLeave = Boolean(currentMember && currentMember.role !== "owner");
 
-  const loadAll = useCallback(async () => {
+  const loadAll = useCallback(async (trackingId?: string) => {
     const supabase = createClient();
     const {
       data: { session },
@@ -65,9 +82,12 @@ export function ShareWorkspacePanel({
       return;
     }
     setCurrentUserId(session.user.id);
+    const fetchOpts = trackingId ? { trackingId } : undefined;
     const [membersRes, invitesRes] = await Promise.all([
-      apiFetch(`/workspaces/${setId}/members`, session.access_token),
-      canManage ? apiFetch(`/workspaces/${setId}/invites`, session.access_token) : Promise.resolve(null),
+      apiFetch(`/workspaces/${setId}/members`, session.access_token, fetchOpts),
+      canManage
+        ? apiFetch(`/workspaces/${setId}/invites`, session.access_token, fetchOpts)
+        : Promise.resolve(null),
     ]);
     if (membersRes.ok) {
       const data = await membersRes.json();
@@ -93,16 +113,22 @@ export function ShareWorkspacePanel({
     if (!session?.access_token) {
       return;
     }
+    const trackingId = generateTrackingId();
     const response = await apiFetch(`/workspaces/${setId}/invites`, session.access_token, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, role }),
+      trackingId,
     });
     if (!response.ok) {
       const body = await response.json().catch(() => ({}));
       toast({
         title: "Invite failed",
-        description: parseApiError(body, "Could not create invite", getTrackingIdFromResponse(response)),
+        description: parseApiError(
+          body,
+          "Could not create invite",
+          getTrackingIdFromResponse(response) ?? trackingId,
+        ),
         variant: "error",
       });
       return;
@@ -116,11 +142,24 @@ export function ShareWorkspacePanel({
       });
       return;
     }
-    const link = `${window.location.origin}/invite/${data.token}`;
+    const link = inviteLinkForToken(data.token);
     setLastInviteLink(link);
     setEmail("");
-    toast({ title: "Invite created", description: "Copy the link below to share.", variant: "success" });
-    await loadAll();
+    toast({
+      title: "Invite link created",
+      description: "InsightLab does not email invites — copy the link and send it yourself.",
+      variant: "success",
+    });
+    await loadAll(trackingId);
+  }
+
+  async function handleCopyLink(link: string) {
+    const copied = await copyInviteLink(link);
+    toast({
+      title: copied ? "Link copied" : "Could not copy",
+      description: copied ? "Paste it in email, chat, or text to your classmate." : "Select and copy the link manually.",
+      variant: copied ? "success" : "error",
+    });
   }
 
   async function handleRemoveMember(member: Member) {
@@ -141,11 +180,12 @@ export function ShareWorkspacePanel({
     }
 
     setRemovingMemberId(member.user_id);
+    const trackingId = generateTrackingId();
     try {
       const response = await apiFetch(
         `/workspaces/${setId}/members/${member.user_id}`,
         session.access_token,
-        { method: "DELETE" },
+        { method: "DELETE", trackingId },
       );
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -157,7 +197,7 @@ export function ShareWorkspacePanel({
         return;
       }
       toast({ title: "Member removed", variant: "success" });
-      await loadAll();
+      await loadAll(trackingId);
     } finally {
       setRemovingMemberId(null);
     }
@@ -177,6 +217,7 @@ export function ShareWorkspacePanel({
     }
 
     setUpdatingRoleMemberId(member.user_id);
+    const trackingId = generateTrackingId();
     try {
       const response = await apiFetch(
         `/workspaces/${setId}/members/${member.user_id}`,
@@ -185,6 +226,7 @@ export function ShareWorkspacePanel({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ role: nextRole }),
+          trackingId,
         },
       );
       if (!response.ok) {
@@ -197,7 +239,7 @@ export function ShareWorkspacePanel({
         return;
       }
       toast({ title: "Role updated", variant: "success" });
-      await loadAll();
+      await loadAll(trackingId);
     } finally {
       setUpdatingRoleMemberId(null);
     }
@@ -220,11 +262,12 @@ export function ShareWorkspacePanel({
     }
 
     setRevokingInviteId(invite.id);
+    const trackingId = generateTrackingId();
     try {
       const response = await apiFetch(
         `/workspaces/${setId}/invites/${invite.id}`,
         session.access_token,
-        { method: "DELETE" },
+        { method: "DELETE", trackingId },
       );
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -236,7 +279,7 @@ export function ShareWorkspacePanel({
         return;
       }
       toast({ title: "Invite revoked", variant: "success" });
-      await loadAll();
+      await loadAll(trackingId);
     } finally {
       setRevokingInviteId(null);
     }
@@ -263,9 +306,11 @@ export function ShareWorkspacePanel({
     }
 
     setLeaving(true);
+    const trackingId = generateTrackingId();
     try {
       const response = await apiFetch(`/workspaces/${setId}/leave`, session.access_token, {
         method: "POST",
+        trackingId,
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -292,7 +337,8 @@ export function ShareWorkspacePanel({
       <CardHeader>
         <CardTitle>Share study sheet</CardTitle>
         <CardDescription>
-          Invite classmates as viewers (read + study) or editors (upload + generate tools).
+          Invite classmates as viewers (read + study) or editors (upload + generate tools). Invites are
+          not emailed — you copy a link and send it yourself.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -374,21 +420,34 @@ export function ShareWorkspacePanel({
                   {invites.map((invite) => (
                     <li
                       key={invite.id}
-                      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
+                      className="flex flex-col gap-2 rounded-md border px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
                     >
                       <span className="min-w-0 truncate text-muted-foreground">
                         {invite.email} · {invite.role}
                       </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 shrink-0 text-destructive hover:text-destructive"
-                        disabled={revokingInviteId === invite.id}
-                        onClick={() => void handleRevokeInvite(invite)}
-                      >
-                        {revokingInviteId === invite.id ? "Revoking…" : "Revoke"}
-                      </Button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {invite.token ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8"
+                            onClick={() => void handleCopyLink(inviteLinkForToken(invite.token!))}
+                          >
+                            Copy link
+                          </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-destructive hover:text-destructive"
+                          disabled={revokingInviteId === invite.id}
+                          onClick={() => void handleRevokeInvite(invite)}
+                        >
+                          {revokingInviteId === invite.id ? "Revoking…" : "Revoke"}
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -424,8 +483,17 @@ export function ShareWorkspacePanel({
 
             {lastInviteLink ? (
               <div className="rounded-md border bg-muted/30 p-3 text-xs">
-                <p className="font-medium">Invite link</p>
+                <p className="font-medium">Invite link — send this to your classmate</p>
                 <p className="mt-1 break-all text-muted-foreground">{lastInviteLink}</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 h-8"
+                  onClick={() => void handleCopyLink(lastInviteLink)}
+                >
+                  Copy link
+                </Button>
               </div>
             ) : null}
           </>
