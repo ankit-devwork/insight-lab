@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from pycorekit.tracing.decorators import with_observability
 from pycorekit.correlation.headers import tracking_response_headers
@@ -9,6 +9,7 @@ from app.api.routes.quiz import GenerateQuizRequest
 from app.core.auth import AuthUser
 from app.core.deps import get_current_user
 from app.core.supabase_client import get_supabase_client
+from app.services.workspace_access import require_workspace_role
 from app.services.course_pack_service import generate_course_pack
 from app.services.progress_service import get_workspace_progress
 from app.services.source_links_service import (
@@ -22,6 +23,7 @@ from app.services.sharing_service import (
     create_workspace_invite,
     leave_workspace,
     list_workspace_invites,
+    get_workspace_invite_link,
     list_workspace_members,
     remove_workspace_member,
     revoke_workspace_invite,
@@ -37,6 +39,8 @@ from app.services.workspace_service import (
     update_workspace,
 )
 from app.services.export_utils import course_pack_to_markdown
+from app.services.classroom_analytics_service import get_classroom_analytics
+from app.services.lms_export_service import build_lms_bundle_zip
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
@@ -301,10 +305,11 @@ async def export_course_pack_markdown_route(
     request: Request,
     user: AuthUser = Depends(get_current_user),
 ):
-    workspace = get_workspace(get_supabase_client(), workspace_id, user)
-    documents = list_workspace_documents(get_supabase_client(), workspace_id, user, limit=50)
-    summaries = []
     client = get_supabase_client()
+    require_workspace_role(client, workspace_id, user, min_role="editor")
+    workspace = get_workspace(client, workspace_id, user)
+    documents = list_workspace_documents(client, workspace_id, user, limit=50)
+    summaries = []
     for doc in documents:
         if doc.get("file_type") != "document" or doc.get("status") != "ready":
             continue
@@ -322,6 +327,66 @@ async def export_course_pack_markdown_route(
         media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="course-pack-{workspace_id}.md"',
+            **tracking_response_headers(correlation_id),
+        },
+    )
+
+
+@router.get("/{workspace_id}/classroom/analytics")
+@with_observability("get_classroom_analytics")
+async def get_classroom_analytics_route(
+    workspace_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    result = get_classroom_analytics(get_supabase_client(), workspace_id, user)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return {**result, "correlation_id": correlation_id}
+
+
+@router.get("/{workspace_id}/export/canvas-cartridge")
+@with_observability("export_canvas_cartridge")
+async def export_canvas_cartridge_route(
+    workspace_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    payload, filename = build_lms_bundle_zip(
+        get_supabase_client(),
+        workspace_id,
+        user,
+        include_manifest=True,
+    )
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return Response(
+        content=payload,
+        media_type="application/vnd.ims.imsccv1p1+zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            **tracking_response_headers(correlation_id),
+        },
+    )
+
+
+@router.get("/{workspace_id}/export/lms-bundle")
+@with_observability("export_lms_bundle")
+async def export_lms_bundle_route(
+    workspace_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    payload, filename = build_lms_bundle_zip(
+        get_supabase_client(),
+        workspace_id,
+        user,
+        include_manifest=False,
+    )
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
             **tracking_response_headers(correlation_id),
         },
     )
@@ -349,6 +414,19 @@ async def list_workspace_invites_route(
     invites = list_workspace_invites(get_supabase_client(), workspace_id, user)
     correlation_id = getattr(request.state, "correlation_id", None)
     return {"invites": invites, "correlation_id": correlation_id}
+
+
+@router.get("/{workspace_id}/invites/{invite_id}/link")
+@with_observability("get_workspace_invite_link")
+async def get_workspace_invite_link_route(
+    workspace_id: str,
+    invite_id: str,
+    request: Request,
+    user: AuthUser = Depends(get_current_user),
+):
+    link = get_workspace_invite_link(get_supabase_client(), workspace_id, invite_id, user)
+    correlation_id = getattr(request.state, "correlation_id", None)
+    return {**link, "correlation_id": correlation_id}
 
 
 @router.post("/{workspace_id}/invites")

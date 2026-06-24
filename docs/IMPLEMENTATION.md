@@ -465,20 +465,37 @@ Migration: `011_phase8_member_rls.sql` (chunks, quizzes, flashcards, study guide
 | Compare page | Explains PDF/Word vs Excel routing; links to spreadsheet canvas |
 | Onboarding tour | Route-aware steps including Excel notebook layout |
 
-## Next up — Phase 9
+## Phase 9 (in progress)
 
-- LMS export bundles (SCORM / Canvas)
+| Feature | Backend | Frontend |
+|---------|---------|----------|
+| Classroom analytics | `GET /workspaces/{id}/classroom/analytics` | `ClassroomAnalyticsPanel` on set detail (editors+) |
+| Canvas Common Cartridge | `GET /workspaces/{id}/export/canvas-cartridge` | Course pack drawer — Export Canvas (.imscc) |
+| LMS resource bundle | `GET /workspaces/{id}/export/lms-bundle` | Course pack drawer — Export LMS zip |
+
+Still planned:
+
+- SCORM 1.2 packages
 - Storage read policies for workspace members (optional if all reads stay backend-only)
 
 ## Security & resilience checklist
 
+See [SECURITY.md](SECURITY.md) for the full production security guide.
+
 | Control | Status |
 |---------|--------|
-| Supabase RLS + Storage policies (migrations 005–011) | Required in prod |
+| Supabase RLS + Storage policies (migrations 005–015) | Required in prod |
 | JWT auth on all document/quiz/excel routes | Done |
+| JWT `role === authenticated` enforcement | Done |
+| Public quiz rate limits + answer validation | Done |
+| Invite tokens not in list API (link endpoint) | Done |
+| Export routes require editor (Markdown, LMS, QTI) | Done |
 | User-scoped cache keys (summary, chat, quiz, excel) | Done |
-| Rate limits (upload, process, chat, quiz generate/submit, excel, sharing invites) | Done |
+| Rate limits (upload, process, chat, quiz, excel, sharing, public quiz) | Done |
 | Grounded LLM prompts + excerpt marker stripping | Done |
 | Retry + circuit breaker on LLM/Storage | Done |
 | Phase 2 migration guard (graceful degradation) | Done |
 | Generic errors to clients; sanitized stored errors | Done |
+| Production: OpenAPI hidden, CORS HTTPS validation | Done |
+| Study guide PDF export HTML-escaped | Done |
+| `profiles.role` self-elevation blocked (migration 015) | Done |

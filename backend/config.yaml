@@ -64,11 +64,11 @@ sharing:
   member_change_rate_limit_per_min: 20
 
 email:
-  enabled: true
+  enabled: false
   from_address: "InsightLab <onboarding@resend.dev>"
-  frontend_base_url: "https://insight-lab-pi.vercel.app/"
+  frontend_base_url: "http://localhost:3000"
   resend_api_key_env: RESEND_API_KEY
-  notify_artifact_ready: true
+  notify_artifact_ready: false
 
 documents:
   chunk_size: 1200
@@ -108,6 +108,9 @@ excel:
 quizzes:
   generate_rate_limit_per_min: 5
   submit_rate_limit_per_min: 30
+  public_get_rate_limit_per_min: 30
+  public_submit_rate_limit_per_min: 10
+  public_max_answers_bytes: 4096
   default_num_questions: 5
   max_questions: 10
   max_context_chunks: 8
