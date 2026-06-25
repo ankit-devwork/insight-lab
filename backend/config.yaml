@@ -1,5 +1,5 @@
 app:
-  env: development
+  env: production
   debug: false
   name: InsightLab API
 
@@ -8,7 +8,7 @@ logging:
 
 upload:
   storage_bucket: uploads
-  max_bytes: 10485760
+  max_bytes: 4194304
   rate_limit_per_hour: 10
   filename_max_length: 255
   default_workspace_name: My Workspace
